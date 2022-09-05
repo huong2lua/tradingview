@@ -35,9 +35,4 @@ function setupAutoClickCloseButtonInside(selector) {
   });
 }
 
-(function() {
-  'use strict';
-  const checkAd = setInterval(() => {
-      setupAutoClickCloseButtonInside('[data-dialog-name="gopro"]');
-  }, 500);
-})();
+setupAutoClickCloseButtonInside('[data-dialog-name="gopro"]');
