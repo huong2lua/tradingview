@@ -16,4 +16,4 @@ const hideAds = setInterval(() => {
       adDialog.querySelector("button").click();
       console.log('popup closed');
   }
-}, 500);
+}, 10);
