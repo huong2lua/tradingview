@@ -1,0 +1,47 @@
+//@version=6
+indicator('Lúa MACD', shorttitle = 'Lúa MACD', format = format.price, precision = 2)
+
+// Tham số đầu vào
+fastMA = input.int(12, 'Fast MA', minval = 1)
+slowMA = input.int(26, 'Slow MA', minval = 1)
+
+// MACD hiện tại và trước đó
+[currMacd, _, _] = ta.macd(close[0], fastMA, slowMA, 9)
+[prevMacd, _, _] = ta.macd(close[1], fastMA, slowMA, 9)
+
+// Màu histogram 4 màu (phải để 1 dòng)
+plotColor = currMacd > 0 ? currMacd > prevMacd ? color.new(color.rgb(0, 255, 0), 35) : color.new(color.rgb(0, 128, 0), 35) : currMacd < prevMacd ? color.new(color.rgb(128, 0, 0), 35) : color.new(color.rgb(255, 0, 0), 35)
+
+// Vẽ MACD histogram và đường 0
+plot(currMacd, style = plot.style_histogram, color = plotColor, linewidth = 3, title = 'MACD Histogram')
+plot(0, title = 'Zero Line', linewidth = 1, color = color.gray)
+
+// ---------------------------
+// ⚡ Cảnh báo khi MACD đổi màu (chỉ khi nến đóng)
+// ---------------------------
+
+// Xác định trạng thái màu hiện tại
+isUpStrong = currMacd > 0 and currMacd > prevMacd // lime
+isUpWeak = currMacd > 0 and currMacd <= prevMacd // green
+isDownWeak = currMacd <= 0 and currMacd >= prevMacd // maroon
+isDownStrong = currMacd < 0 and currMacd < prevMacd // red
+
+// Khi MACD đổi nhóm màu (so với trước đó)
+colorChanged = isUpStrong and not isUpStrong[1] or isUpWeak and not isUpWeak[1] or isDownWeak and not isDownWeak[1] or isDownStrong and not isDownStrong[1]
+
+// Chỉ báo khi nến đóng
+alertOnClose = colorChanged and barstate.isconfirmed
+
+if alertOnClose
+    // Tạo text & JSON gửi Telegram — tất cả trên 1 dòng để không lỗi
+    trendType = (isUpStrong ? "mua mạnh 🟢" : isUpWeak ? "mua yếu 📈" : isDownWeak ? "bán yếu 🟠" : isDownStrong ? "bán mạnh 🔻" : "không xác định ❓")
+    txt2send = str.tostring(syminfo.ticker) + " " + timeframe.period + "m" + " lực " + trendType
+
+    alertMessage = '{"chat_id":"5978153872","text":"' + txt2send + '"}'
+
+    // Gửi webhook
+    alert(alertMessage, freq=alert.freq_once_per_bar_close)
+    
+
+// Tạo điều kiện cảnh báo
+alertcondition(alertOnClose, title = 'MACD đổi màu', message = '{"chat_id":"5978153872","text":"your text here"}')
