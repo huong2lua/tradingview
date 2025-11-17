@@ -4,16 +4,11 @@ indicator(title="MACD 4C Pro", shorttitle="MACD4C_Pro")
 // =====================
 // 1) INPUTS
 // =====================
-fastMA           = input.int(12,    title = 'Fast MA', minval = 1)
-slowMA           = input.int(26,    title = 'Slow MA', minval = 1)
-sigMA            = input.int(9,     title = 'Signal MA', minval = 1)
-atrLength        = input.int(14,    title = 'ATR Length', minval = 1)
-atrMult          = input.float(1.5, title = 'ATR Multiplier (for SL)', step = 0.1)
-rrRatio          = input.float(2.0, title = 'Risk:Reward Ratio (TP/SL)', step = 0.1)
-riskUSD          = input.float(20,  title = 'Risk per trade (USD)', step = 1.0)
-swingLen         = input.int(9,     title = 'Swing length (lowest/highest) for SL', minval = 1)
-tickValuePerLot  = input.float(0.1, title = 'Tick value per lot (USD/tick/lot)', step = 0.01, minval = 0.0001)
-chatId           = input.string("-1003256916567", title = "Telegram chat_id (optional)")
+fastMA   = input.int(12, title = 'Fast MA', minval = 1)
+slowMA   = input.int(26, title = 'Slow MA', minval = 1)
+sigMA    = input.int(9,  title = 'Signal MA', minval = 1)
+atrLength = input.int(14, title = 'ATR Length', minval = 1)
+chatId   = input.string("-1003256916567", title = "Telegram chat_id (optional)")
 
 // ---------------------
 // helper: timeframe label
@@ -59,56 +54,30 @@ colorChanged = (isUpStrong and not isUpStrong[1]) or
 isBuySignal  = isUpStrong or isDownWeak
 isSellSignal = isDownStrong or isUpWeak
 
-// ===============================
-// 4) ATR, SL/TP and LOT calculation
-// ===============================
-atrValue   = ta.atr(atrLength)
-lowestSw   = ta.lowest(low,  swingLen)
-highestSw  = ta.highest(high, swingLen)
-currPrice  = close
-
-slBuy  = lowestSw  - atrValue * atrMult
-slSell = highestSw + atrValue * atrMult
-
-// TP is calculated from entry and SL distance * RR ratio
-tpBuy  = currPrice + (currPrice - slBuy) * rrRatio
-tpSell = currPrice - (slSell - currPrice) * rrRatio
-
-slDistance = isBuySignal  ? (currPrice - slBuy)  :
-             isSellSignal ? (slSell - currPrice) :
-             na
-
-ticksToSL = na(slDistance) ? na : slDistance / syminfo.mintick
-
-// Lot sizing: round to step and enforce minimum
-MIN_LOT  = 0.01
-LOT_STEP = 0.01
-
-lotRaw     = na(ticksToSL) or (ticksToSL <= 0) ? na : (riskUSD / (ticksToSL * tickValuePerLot))
-lotRounded = na(lotRaw) ? na : math.round(lotRaw / LOT_STEP) * LOT_STEP
-lotSize    = na(lotRounded) ? na : math.max(lotRounded, MIN_LOT)
+// ==================================
+// 4) ATR hiện tại
+// ==================================
+atrValue = ta.atr(atrLength)
 
 // =======================
-// 5) ALERT + WEBHOOK JSON
+// 5) ALERT + WEBHOOK JSON (NO TP/SL/LOT)
 // =======================
 alertOnClose  = colorChanged and barstate.isconfirmed
 
 if alertOnClose
     // human-friendly labels
-    trendType  = isUpStrong ? "mua mạnh 🟢" : isUpWeak ? "mua yếu 📈" : isDownWeak ? "bán yếu 🟠" : isDownStrong ? "bán mạnh 🔻" : "không xác định ❓"
+    trendType  = isUpStrong ? "mua mạnh 🟢" : isUpWeak ? "mua yếu 🔵" : isDownWeak ? "bán yếu 🟠" : isDownStrong ? "bán mạnh 🔴" : "không xác định ❓"
     signalType = isBuySignal ? "BUY 🟩" : isSellSignal ? "SELL 🟥" : "NO ❓"
 
-    slValue = isBuySignal ? slBuy : isSellSignal ? slSell : na
-    tpValue = isBuySignal ? tpBuy : isSellSignal ? tpSell : na
-
-    // single-line message separated by │
+    // single-line message separated by │, thêm OHLC + ATR
     msg = "#" + syminfo.ticker + " " + tfLabel() + " │ " +
           trendType + " │ " +
           signalType + " │ " +
-          "Entry: " + str.tostring(currPrice, format.mintick) + " │ " +
-          "SL: "    + str.tostring(slValue,   format.mintick) + " │ " +
-          "TP: "    + str.tostring(tpValue,   format.mintick) + " │ " +
-          "Lot: "   + (na(lotSize) ? "n/a" : str.tostring(lotSize, "#.##"))
+          "O: " + str.tostring(open,  format.mintick) + " │ " +
+          "H: " + str.tostring(high,  format.mintick) + " │ " +
+          "L: " + str.tostring(low,   format.mintick) + " │ " +
+          "C: " + str.tostring(close, format.mintick) + " │ " +
+          "ATR(" + str.tostring(atrLength) + "): " + str.tostring(atrValue, format.mintick)
 
     safeMsg = str.replace(msg, '"', '\\"')
     alertMessage = '{"chat_id":"' + chatId + '","text":"' + safeMsg + '"}'
