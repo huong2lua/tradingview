@@ -1,158 +1,117 @@
 //@version=6
-indicator('MACD 4C (Pro) — Lot theo tick + Lọc tín hiệu', shorttitle='MACD4C Pro', format=format.price, precision=2)
+indicator(title="MACD 4C Pro", shorttitle="MACD4C_Pro")
 
 // =====================
-// 1) INPUTS / THAM SỐ
+// 1) INPUTS
 // =====================
+fastMA           = input.int(12,    title = 'Fast MA', minval = 1)
+slowMA           = input.int(26,    title = 'Slow MA', minval = 1)
+sigMA            = input.int(9,     title = 'Signal MA', minval = 1)
+atrLength        = input.int(14,    title = 'ATR Length', minval = 1)
+atrMult          = input.float(1.5, title = 'ATR Multiplier (for SL)', step = 0.1)
+rrRatio          = input.float(2.0, title = 'Risk:Reward Ratio (TP/SL)', step = 0.1)
+riskUSD          = input.float(20,  title = 'Risk per trade (USD)', step = 1.0)
+swingLen         = input.int(9,     title = 'Swing length (lowest/highest) for SL', minval = 1)
+tickValuePerLot  = input.float(0.1, title = 'Tick value per lot (USD/tick/lot)', step = 0.01, minval = 0.0001)
+chatId           = input.string("-1003256916567", title = "Telegram chat_id (optional)")
 
-// --- MACD & ATR
-fastMA    = input.int(12,  'Fast MA', minval=1)
-slowMA    = input.int(26,  'Slow MA', minval=1)
-sigMA     = input.int(9,   'Signal MA', minval=1)
-atrLength = input.int(14,  'ATR Length', minval=1)
-atrMult   = input.float(1.5, 'ATR Multiplier (cho SL)', step=0.1)
-
-// --- TP/SL & Risk
-rrRatio   = input.float(2.0, 'Risk:Reward Ratio (TP/SL)', step=0.1)
-riskUSD   = input.float(20,  'Mức rủi ro mỗi lệnh (USD)', step=1.0)
-
-// --- Vùng swing để đặt SL (thay cho cố định 9)
-swingLen  = input.int(9, 'Độ dài swing (lowest/highest) cho SL', minval=1)
-
-// --- Lot theo tick (TỔNG QUÁT, không cần biết pip của từng sản phẩm)
-//     tick = bước nhảy nhỏ nhất của symbol (syminfo.mintick)
-//     Bạn điền đúng "USD/tick/lot" theo sản phẩm/broker của bạn.
-//     Ví dụ: Nếu mỗi tick của 1 lot trị giá 1 USD -> nhập 1.0
-//            Nếu mỗi tick của 1 lot trị giá 10 USD -> nhập 10.0
-tickValuePerLot = input.float(10.0, 'Giá trị mỗi tick cho 1 lot (USD/tick/lot)', step=0.01, minval=0.0001)
-
-// --- Lọc tín hiệu (tuỳ chọn, để giảm nhiễu)
-useSignalConfirm = input.bool(true,  'Bật lọc: MACD line phải cùng phía với Signal (mua: MACD>Signal, bán: MACD<Signal)')
-useZeroFilter    = input.bool(false, 'Bật lọc: Zero-line (mua khi hist>0, bán khi hist<0)')
-minHistAbs       = input.float(0.0,  'Ngưỡng |Histogram| tối thiểu (0 = tắt)', step=0.0001, minval=0.0)
-
-// --- Webhook/Telegram
-chatId    = input.string("5978153872", "Telegram chat_id (tuỳ chọn)")
-// Lưu ý: URL webhook được cài trong cửa sổ Alert của TradingView, không code trong script.
+// ---------------------
+// helper: timeframe label
+// ---------------------
+tfLabel() =>
+    m = timeframe.multiplier
+    timeframe.isseconds ? str.tostring(m) + "s" :
+     timeframe.isminutes and m < 60 ? str.tostring(m) + "m" :
+     timeframe.isminutes ? str.tostring(m/60) + "h" :
+     timeframe.isdaily ? (m == 1 ? "1D" : str.tostring(m) + "D") :
+     timeframe.isweekly ? (m == 1 ? "1W" : str.tostring(m) + "W") :
+     timeframe.ismonthly ? (m == 1 ? "1M" : str.tostring(m) + "M") :
+     timeframe.period
 
 // =============================================
-// 2) TÍNH MACD & DÙNG HISTOGRAM THẬT CHO 4 MÀU
+// 2) MACD + 4-color histogram
 // =============================================
-[macdLine, signalLine, _] = ta.macd(close, fastMA, slowMA, 9)
+[macdLine, signalLine, _] = ta.macd(close, fastMA, slowMA, sigMA)
 currMacd = macdLine
 prevMacd = macdLine[1]
 
-// Màu 4 trạng thái:
-//  - >0 & tăng   : xanh sáng (up strong)
-//  - >0 & giảm   : xanh đậm  (up weak)
-//  - <0 & tăng   : đỏ nâu     (down weak)
-//  - <0 & giảm   : đỏ tươi    (down strong)
 isUpStrong   = currMacd > 0 and currMacd > prevMacd
 isUpWeak     = currMacd > 0 and currMacd <= prevMacd
 isDownWeak   = currMacd <= 0 and currMacd >= prevMacd
 isDownStrong = currMacd < 0 and currMacd < prevMacd
 
-plotColor = currMacd > 0 ? currMacd > prevMacd ? color.new(color.rgb(0, 255, 0), 35) : color.new(color.rgb(0, 128, 0), 35) : currMacd < prevMacd ? color.new(color.rgb(128, 0, 0), 35) : color.new(color.rgb(255, 0, 0), 35)
+// Optimized ternary version (fastest execution)
+plotColor = currMacd > 0 ? (currMacd > prevMacd ? color.new(color.rgb(0, 255, 0), 35) : color.new(color.rgb(0, 128, 0), 35))
+                         : (currMacd < prevMacd ? color.new(color.rgb(128, 0, 0), 35) : color.new(color.rgb(255, 0, 0), 35))
 
+plot(currMacd, style = plot.style_histogram, color = plotColor, linewidth = 3, title = 'MACD Histogram')
+plot(0, title = 'Zero Line', linewidth = 1, color = color.gray)
 
-// Vẽ Histogram + zero-line
-plot(currMacd, style=plot.style_histogram, color=plotColor, linewidth=3, title='MACD Histogram')
-plot(0, title='Zero Line', linewidth=1, color=color.gray)
-
-// Đổi nhóm màu so với bar trước? (để chặn spam khi màu không đổi)
+// detect color change (for alert trigger)
 colorChanged = (isUpStrong and not isUpStrong[1]) or
-               (isUpWeak and not isUpWeak[1]) or
+               (isUpWeak   and not isUpWeak[1])   or
                (isDownWeak and not isDownWeak[1]) or
                (isDownStrong and not isDownStrong[1])
 
 // ==================================
-// 3) TÍN HIỆU GỐC + BỘ LỌC TUỲ CHỌN
+// 3) SIGNALS
 // ==================================
-
-// Tín hiệu gốc giống bản của bạn:
-isBuyRaw  = isUpStrong or isDownWeak    // mua: lực mua mạnh hoặc bán yếu
-isSellRaw = isDownStrong or isUpWeak    // bán: lực bán mạnh hoặc mua yếu
-
-// Bộ lọc 1: MACD line cùng phía với Signal? (không cần cắt, chỉ cần ở cùng phía để giảm nhiễu)
-signalAgreeBuy  = macdLine > signalLine
-signalAgreeSell = macdLine < signalLine
-passSignalAgree = not useSignalConfirm or (isBuyRaw and signalAgreeBuy) or (isSellRaw and signalAgreeSell)
-
-// Bộ lọc 2: Zero-line (hist > 0 cho Buy, < 0 cho Sell)
-passZero = not useZeroFilter or (isBuyRaw and currMacd > 0) or (isSellRaw and currMacd < 0)
-
-// Bộ lọc 3: Ngưỡng tối thiểu |hist|
-passMinHist = (minHistAbs <= 0.0) or (math.abs(currMacd) >= minHistAbs)
-
-// Tín hiệu sau lọc:
-isBuySignal  = isBuyRaw  and passSignalAgree and passZero and passMinHist
-isSellSignal = isSellRaw and passSignalAgree and passZero and passMinHist
+isBuySignal  = isUpStrong or isDownWeak
+isSellSignal = isDownStrong or isUpWeak
 
 // ===============================
-// 4) ATR + SL/TP + KHỐI LƯỢNG LOT
+// 4) ATR, SL/TP and LOT calculation
 // ===============================
+atrValue   = ta.atr(atrLength)
+lowestSw   = ta.lowest(low,  swingLen)
+highestSw  = ta.highest(high, swingLen)
+currPrice  = close
 
-// ATR & vùng swing
-atrValue = ta.atr(atrLength)
-lowestSw  = ta.lowest(low,  swingLen)
-highestSw = ta.highest(high, swingLen)
-currPrice = close
-
-// SL/TP theo hướng
 slBuy  = lowestSw  - atrValue * atrMult
 slSell = highestSw + atrValue * atrMult
-tpBuy  = currPrice + (currPrice - slBuy)   * rrRatio
-tpSell = currPrice - (slSell   - currPrice)* rrRatio
 
-// Khoảng cách tới SL (đơn vị GIÁ)
-slDistance =
-     isBuySignal  ? (currPrice - slBuy)  :
-     isSellSignal ? (slSell - currPrice) :
-     na
+// TP is calculated from entry and SL distance * RR ratio
+tpBuy  = currPrice + (currPrice - slBuy) * rrRatio
+tpSell = currPrice - (slSell - currPrice) * rrRatio
 
-// Chuyển sang số TICK tới SL để tính tiền rủi ro chuẩn mọi sản phẩm
+slDistance = isBuySignal  ? (currPrice - slBuy)  :
+             isSellSignal ? (slSell - currPrice) :
+             na
+
 ticksToSL = na(slDistance) ? na : slDistance / syminfo.mintick
 
-// Lot size (USD rủi ro / (ticks * USD/tick/lot))
-// Guard: nếu không có tín hiệu, hoặc ticks<=0, sẽ ra na
-lotSize = na(ticksToSL) or (ticksToSL <= 0) ? na : (riskUSD / (ticksToSL * tickValuePerLot))
+// Lot sizing: round to step and enforce minimum
+MIN_LOT  = 0.01
+LOT_STEP = 0.01
+
+lotRaw     = na(ticksToSL) or (ticksToSL <= 0) ? na : (riskUSD / (ticksToSL * tickValuePerLot))
+lotRounded = na(lotRaw) ? na : math.round(lotRaw / LOT_STEP) * LOT_STEP
+lotSize    = na(lotRounded) ? na : math.max(lotRounded, MIN_LOT)
 
 // =======================
 // 5) ALERT + WEBHOOK JSON
 // =======================
-
-// Chỉ alert khi đổi màu VÀ tín hiệu qua lọc VÀ nến đã đóng (tránh repaint)
-finalSignal = (isBuySignal or isSellSignal)
-alertOnClose = colorChanged and finalSignal and barstate.isconfirmed
+alertOnClose  = colorChanged and barstate.isconfirmed
 
 if alertOnClose
-    // Gắn nhãn trạng thái & hướng
-    trendType = isUpStrong ? "mua mạnh 🟢" : isUpWeak ? "mua yếu 📈" : isDownWeak ? "bán yếu 🟠" : isDownStrong ? "bán mạnh 🔻" : "không xác định ❓"
+    // human-friendly labels
+    trendType  = isUpStrong ? "mua mạnh 🟢" : isUpWeak ? "mua yếu 📈" : isDownWeak ? "bán yếu 🟠" : isDownStrong ? "bán mạnh 🔻" : "không xác định ❓"
     signalType = isBuySignal ? "BUY 🟩" : isSellSignal ? "SELL 🟥" : "NO ❓"
 
-    slValue = isBuySignal  ? slBuy  : isSellSignal ? slSell : na
-    tpValue = isBuySignal  ? tpBuy  : isSellSignal ? tpSell : na
+    slValue = isBuySignal ? slBuy : isSellSignal ? slSell : na
+    tpValue = isBuySignal ? tpBuy : isSellSignal ? tpSell : na
 
-    // Không ép "m" vào timeframe -> dùng trực tiếp để hợp mọi khung (1, 5, 1D, 1W, ...)
-    tfLabel = timeframe.period
+    // single-line message separated by │
+    msg = "#" + syminfo.ticker + " " + tfLabel() + " │ " +
+          trendType + " │ " +
+          signalType + " │ " +
+          "Entry: " + str.tostring(currPrice, format.mintick) + " │ " +
+          "SL: "    + str.tostring(slValue,   format.mintick) + " │ " +
+          "TP: "    + str.tostring(tpValue,   format.mintick) + " │ " +
+          "Lot: "   + (na(lotSize) ? "n/a" : str.tostring(lotSize, "#.##"))
 
-    // Tạo message hiển thị
-    msg =
-      "#" + syminfo.ticker + "m " + tfLabel + " lực " + trendType + " │ " + signalType + " │ " +
-      "Entry: " + str.tostring(currPrice, format.mintick) + " │ " +
-      "SL: "    + str.tostring(slValue,   format.mintick) + " │ " +
-      "TP: "    + str.tostring(tpValue,   format.mintick) + " │ " +
-      "Lot: "   + (na(lotSize) ? "n/a" : str.tostring(lotSize, "#.###"))
-
-    // Escape dấu ngoặc kép để JSON không lỗi
     safeMsg = str.replace(msg, '"', '\\"')
-
-    // Payload gửi Telegram (URL webhook cài trong Alert của TradingView)
     alertMessage = '{"chat_id":"' + chatId + '","text":"' + safeMsg + '"}'
+    alert(alertMessage, freq = alert.freq_once_per_bar_close)
 
-    // Gửi 1 lần khi nến đóng
-    alert(alertMessage, freq=alert.freq_once_per_bar_close)
-
-// Tạo điều kiện cho cửa sổ Alerts (message mẫu — bạn có thể thay)
-alertcondition(alertOnClose, title='MACD đổi màu (đã lọc)', message='{"chat_id":"5978153872","text":"your text here"}')
-
+// End of script
